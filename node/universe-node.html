@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Universe Node — Reference Implementation v0.1</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #131722;
+    --border: #262b3a;
+    --text: #d8dce6;
+    --dim: #7a8194;
+    --accent: #5b8dee;
+    --ok: #4caf7d;
+    --err: #d9635a;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    padding: 16px;
+    padding-bottom: 60px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--accent); }
+  .subtitle { color: var(--dim); font-size: 13px; margin-bottom: 20px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    color: var(--dim);
+    margin-bottom: 4px;
+    margin-top: 10px;
+  }
+  label:first-child { margin-top: 0; }
+  input, select {
+    width: 100%;
+    background: #0d1017;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 10px;
+    font-size: 15px;
+    font-family: var(--mono);
+  }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button {
+    width: 100%;
+    padding: 13px;
+    margin-top: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  button:active { opacity: 0.8; }
+  .event {
+    border-left: 3px solid var(--accent);
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: #0d1017;
+    border-radius: 0 6px 6px 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+  .event.rejected { border-left-color: var(--err); opacity: 0.75; }
+  .event .line1 { color: var(--text); font-weight: 600; }
+  .event .line2 { color: var(--dim); margin-top: 2px; }
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(91,141,238,0.15);
+    color: var(--accent);
+    margin-left: 6px;
+  }
+  .badge.err { background: rgba(217,99,90,0.15); color: var(--err); }
+  .empty { color: var(--dim); font-size: 13px; text-align: center; padding: 20px 0; }
+  .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+  .stat .k { color: var(--dim); }
+  .stat .v { font-family: var(--mono); }
+  pre {
+    background: #0d1017;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 11px;
+    overflow-x: auto;
+    color: var(--dim);
+    max-height: 160px;
+  }
+  .tag { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; }
+</style>
+</head>
+<body>
+
+<h1>Universe Node</h1>
+<div class="subtitle">Reference implementation v0.1 — Shared Reality Protocol</div>
+
+<!-- ============================================================
+     UNIVERSE PANEL
+     ============================================================ -->
+<div class="panel">
+  <h2>Universe</h2>
+  <label>Seed</label>
+  <div class="row">
+    <input id="seedInput" type="text" placeholder="e.g. 928374928 or any string">
+    <button class="secondary" style="width:auto; margin-top:0; padding:10px 14px;" onclick="randomSeed()">🎲</button>
+  </div>
+  <button onclick="initUniverse()">Create / Load Universe</button>
+  <div id="universeInfo" style="margin-top:12px;"></div>
+</div>
+
+<!-- ============================================================
+     ACTION PANEL
+     ============================================================ -->
+<div class="panel" id="actionPanel" style="display:none;">
+  <h2>Submit Action</h2>
+  <label>Actor ID</label>
+  <input id="actorInput" type="text" placeholder="player_001">
+
+  <label>Action type</label>
+  <select id="actionType" onchange="onActionTypeChange()">
+    <option value="spawn_entity">spawn_entity</option>
+    <option value="land">land</option>
+    <option value="leave_message">leave_message</option>
+    <option value="region.energy_release">region.energy_release</option>
+  </select>
+
+  <div id="actionFields"></div>
+
+  <button onclick="submitAction()">Submit Action</button>
+</div>
+
+<!-- ============================================================
+     GENERATION PREVIEW PANEL (whitepaper §4.4 — probability_of())
+     ============================================================ -->
+<div class="panel" id="previewPanel" style="display:none;">
+  <h2>Generation Preview</h2>
+  <div class="tag">probability_of() vs resolve() — same formula chain</div>
+  <label style="margin-top:10px;">Coordinate</label>
+  <select id="previewCoord"></select>
+  <button class="secondary" onclick="runPreview()">Preview distribution</button>
+  <div id="previewResult" style="margin-top:10px;"></div>
+</div>
+
+<!-- ============================================================
+     STATE PANEL
+     ============================================================ -->
+<div class="panel" id="statePanel" style="display:none;">
+  <h2>Current State</h2>
+  <div class="stat"><span class="k">Entities</span><span class="v" id="statEntities">0</span></div>
+  <div class="stat"><span class="k">Relations</span><span class="v" id="statRelations">0</span></div>
+  <div class="stat"><span class="k">Events recorded</span><span class="v" id="statEvents">0</span></div>
+  <button class="secondary" onclick="toggleRawState()">View raw State (JSON)</button>
+  <pre id="rawState" style="display:none;"></pre>
+</div>
+
+<!-- ============================================================
+     EVENT LOG
+     ============================================================ -->
+<div class="panel" id="logPanel" style="display:none;">
+  <h2>Event Log</h2>
+  <div id="eventLog"></div>
+</div>
+
+<script>
+/* ==================================================================
+   UNIVERSE NODE — REFERENCE IMPLEMENTATION v0.1
+   Implements SPEC-1.md: Entity, Property, Relation, Action, Event,
+   Rule, State — and the mandatory flow Action → Validation → Event →
+   State change (SPEC-1.md section 5).
+
+   This file is a NODE, not a client. The small UI above exists only
+   to submit Actions and inspect the resulting State/Event Log — it
+   has no game-specific concept (no "ship", "combat", "character").
+   Any genre-specific meaning belongs in a client, not here.
+   ================================================================== */
+
+// ---- Deterministic PRNG -------------------------------------------
+// Same algorithm (hashSeed + mulberry32) already validated in the
+// "The Cartographers" client, kept here so any Node/Client pair using
+// the same seed can reproduce the same base Universe. Per SPEC-1.md
+// §6, all implementations must use this exact algorithm.
+
+function hashSeed(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  }
+  return h >>> 0;
+}
+
+function rngFrom(seed, coordinate, level) {
+  const combined = hashSeed(`${seed}:${coordinate}:${level}`);
+  let state = combined;
+  return function next() {
+    state |= 0;
+    state = (state + 0x6D2B79F5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---- Persistence (IndexedDB) ---------------------------------------
+// Each universe (keyed by seed) is stored as one record containing its
+// full State snapshot (entities/properties/relations/events/counters).
+// This is a Node-local persistence detail, not part of the protocol
+// itself — SPEC.md doesn't mandate a storage format.
+
+const DB_NAME = "universe_node_db";
+const DB_STORE = "universes";
+let db = null;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(DB_STORE, { keyPath: "seed" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function saveUniverse() {
+  if (!db || !universe) return;
+  const tx = db.transaction(DB_STORE, "readwrite");
+  tx.objectStore(DB_STORE).put({
+    seed: universe.seed,
+    universe,
+    entities: Array.from(entities.entries()),
+    properties, relations, events,
+    knownActors: Array.from(knownActors),
+    entityCounter, eventCounter
+  });
+}
+
+function loadUniverse(seed) {
+  return new Promise((resolve, reject) => {
+    if (!db) return resolve(null);
+    const tx = db.transaction(DB_STORE, "readonly");
+    const req = tx.objectStore(DB_STORE).get(seed);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// ---- Node state (in-memory, mirrored to IndexedDB on every change) -
+
+let universe = null;      // { id, seed, protocol_version, created_at }
+let entities = new Map(); // id -> Entity
+let properties = [];      // list of { entity, property, value, event_id }
+let relations = [];       // list of { from, relation, to, event_id }
+let events = [];          // ordered, immutable Event log
+let knownActors = new Set();
+let entityCounter = 0;
+let eventCounter = 0;
+
+// ---- Rules ----------------------------------------------------------
+// Per SPEC-1.md §4.7: a Rule is a validation condition and/or effect
+// on the State, associated with one or more Action/Event types.
+// v0.1 keeps Rules as plain functions, documented inline.
+
+const RULES = {
+
+  // Generic: first time an actor is seen, the Node itself emits a
+  // player.joined Event before processing the actor's actual Action
+  // (SPEC-1.md §7 — identity is a fact of the universe, not a
+  // separate account system).
+  ensureActorJoined(actor) {
+    if (!knownActors.has(actor)) {
+      knownActors.add(actor);
+      recordEvent({
+        type: "player.joined",
+        actor,
+        target: null,
+        data: {}
+      });
+    }
+  },
+
+  // Rule: spawn_entity
+  // Always valid. Creates a new Entity of the given type. This is the
+  // simplest possible Rule — no preconditions — used mainly to seed a
+  // universe with test content.
+  spawn_entity(action) {
+    const type = action.data?.type;
+    if (!type) return { accepted: false, reason: "missing 'type' in data" };
+    return { accepted: true, effect: (event) => {
+      const id = `${type}_${String(++entityCounter).padStart(4, "0")}`;
+      entities.set(id, { id, type, name: action.data.name || id, created_at_event: event.id });
+      event.data.entity_id = id;
+    }};
+  },
+
+  // Rule: land
+  // Valid only if the target Entity exists. Produces a Relation
+  // "located_in" between actor and target (SPEC-1.md §4.4 Relation).
+  land(action) {
+    if (!action.target || !entities.has(action.target)) {
+      return { accepted: false, reason: `target entity '${action.target}' does not exist` };
+    }
+    return { accepted: true, effect: (event) => {
+      relations.push({ from: action.actor, relation: "located_in", to: action.target, event_id: event.id });
+    }};
+  },
+
+  // Rule: leave_message
+  // Per SPEC-1.md §10 — a narrative artifact. Valid only if target
+  // exists; enforces the suggested 300-char convention limit.
+  leave_message(action) {
+    if (!action.target || !entities.has(action.target)) {
+      return { accepted: false, reason: `target entity '${action.target}' does not exist` };
+    }
+    const text = action.data?.text || "";
+    if (text.length === 0) return { accepted: false, reason: "empty message" };
+    if (text.length > 300) return { accepted: false, reason: "message exceeds 300 characters (SPEC-1.md §10 convention)" };
+    return { accepted: true, effect: () => {} }; // the Event itself IS the artifact — no extra State change
+  },
+
+  // Rule: region.energy_release
+  // Per SPEC-1.md §2.1 — the protocol's example physical Rule. Any
+  // Entity within the given radius (here treated as: same target
+  // region) whose structural_integrity property is below magnitude
+  // loses its "exists_in" Relation to that region.
+  "region.energy_release"(action) {
+    const magnitude = Number(action.data?.magnitude);
+    if (!action.target || !entities.has(action.target)) {
+      return { accepted: false, reason: `target region '${action.target}' does not exist` };
+    }
+    if (!Number.isFinite(magnitude)) {
+      return { accepted: false, reason: "missing/invalid 'magnitude' in data" };
+    }
+    return { accepted: true, effect: (event) => {
+      // find entities related "exists_in" -> target region
+      const affected = relations.filter(r => r.relation === "exists_in" && r.to === action.target);
+      let destroyed = [];
+      for (const rel of affected) {
+        const integrity = getProperty(rel.from, "structural_integrity");
+        if (integrity !== undefined && integrity < magnitude) {
+          rel._destroyed = true; // soft removal, keeps history honest
+          destroyed.push(rel.from);
+        }
+      }
+      relations = relations.filter(r => !r._destroyed);
+      setProperty(action.target, "energy_signature", magnitude, event.id);
+      event.data.destroyed_entities = destroyed;
+    }};
+  }
+};
+
+// ---- Deterministic on-demand generation (SPEC-1.md §6, whitepaper §4) --
+// resolve() sample a value from a distribution shaped by seed+coordinate+
+// level — never a fixed lookup table, so results are explainable and
+// reproducible. probability_of() runs the identical formula chain but
+// stops before the final random draw, returning the distribution instead
+// of a rolled value (whitepaper §4.4 — "preview without divergence").
+//
+// v0.1 keeps this deliberately generic (SPEC-1.md marks "detailed physics"
+// as out of scope): the only base content this Node knows how to seed is
+// a handful of Level-3-ish "region" Entities per universe, each with a
+// genre-agnostic "energy_signature" Property. Anything more specific
+// (planets, creatures, civilizations...) belongs to a client's own
+// vocabulary layered on top — see whitepaper Appendix / SPEC §12.
+
+const BASE_REGION_COUNT = 5;
+
+// Shared resolution chain for a region's energy_signature. `preview`
+// stops before sampling and returns { min, max, mean } instead.
+function resolveRegionSignature(seed, coordinate, preview) {
+  const rng = rngFrom(seed, coordinate, 0); // Level 0: foundations
+  // modifiers, purely illustrative of "value = base × mod(axis) × ..."
+  const base = 10;
+  const modA = 0.5 + rng() * 1.5;   // first draw shapes the range
+  if (preview) {
+    // same chain, but we stop here: report the reachable distribution
+    // instead of consuming the second draw.
+    return { min: +(base * modA * 0.2).toFixed(2), max: +(base * modA * 1.0).toFixed(2), mean: +(base * modA * 0.6).toFixed(2) };
+  }
+  const modB = 0.2 + rng() * 0.8;    // second draw actually rolls the result
+  return +(base * modA * modB).toFixed(2);
+}
+
+function probabilityOf(kind, seed, coordinate) {
+  if (kind === "region.energy_signature") {
+    return resolveRegionSignature(seed, coordinate, true);
+  }
+  return null;
+}
+
+// Generates the base Universe content for a brand-new seed. This runs
+// once, outside the normal Action flow, because it represents the
+// Universe as it exists BEFORE any Event — the same starting point any
+// other correct implementation must derive from the same seed.
+function seedBaseUniverse(seed) {
+  for (let i = 0; i < BASE_REGION_COUNT; i++) {
+    const coordinate = `region:${i}`;
+    const id = `region_${String(++entityCounter).padStart(4, "0")}`;
+    entities.set(id, { id, type: "region", name: `Region ${i}`, created_at_event: null });
+    const signature = resolveRegionSignature(seed, coordinate, false);
+    // Base generation is not itself an Event (SPEC §4.8: State = base
+    // Universe + Events; the base isn't an Event any more than the seed
+    // is). We still record properties so getProperty() can see them.
+    setProperty(id, "energy_signature", signature, null);
+    setProperty(id, "generation_coordinate", coordinate, null);
+  }
+}
+
+// ---- Core primitives: Property helpers -----------------------------
+
+function setProperty(entityId, prop, value, eventId) {
+  properties.push({ entity: entityId, property: prop, value, event_id: eventId });
+}
+function getProperty(entityId, prop) {
+  for (let i = properties.length - 1; i >= 0; i--) {
+    const p = properties[i];
+    if (p.entity === entityId && p.property === prop) return p.value;
+  }
+  return undefined;
+}
+
+// ---- Core flow: Action -> Validation -> Event -> State (SPEC §5) --
+
+function recordEvent({ type, actor, target, data, narrative }) {
+  const event = {
+    id: `event_${String(++eventCounter).padStart(4, "0")}`,
+    sequence: eventCounter,
+    timestamp: new Date().toISOString(),
+    type, actor, target: target || null,
+    data: data || {},
+    narrative: narrative || undefined
+  };
+  events.push(event);
+  return event;
+}
+
+function submitActionInternal(action) {
+  // Step 0 (SPEC §7): identity as a fact of the universe.
+  RULES.ensureActorJoined(action.actor);
+
+  // Step 1-3 (SPEC §5): validate, then — only if valid — create Event.
+  const rule = RULES[action.type];
+  if (!rule) {
+    return { accepted: false, reason: `no Rule registered for action type '${action.type}'` };
+  }
+  const result = rule(action);
+  if (!result.accepted) {
+    return { accepted: false, reason: result.reason };
+  }
+  const event = recordEvent({
+    type: action.type,
+    actor: action.actor,
+    target: action.target,
+    data: { ...action.data },
+    narrative: action.narrative
+  });
+  result.effect(event);
+  saveUniverse();
+  return { accepted: true, event_id: event.id, event };
+}
+
+// ---- UI wiring (this is a CLIENT concern, kept minimal/generic) ---
+
+openDB().then(d => { db = d; }).catch(e => console.error("IndexedDB unavailable:", e));
+
+function randomSeed() {
+  document.getElementById("seedInput").value = Math.floor(Math.random() * 1e9).toString();
+}
+
+async function initUniverse() {
+  const seedRaw = document.getElementById("seedInput").value.trim();
+  if (!seedRaw) { alert("Enter a seed first."); return; }
+
+  const saved = await loadUniverse(seedRaw);
+
+  if (saved) {
+    // Reload previous state as-is (existing Event history is not
+    // regenerated — only the never-yet-touched parts of the universe
+    // are produced on demand, per SPEC-1.md §8 spatial locality).
+    universe = saved.universe;
+    entities = new Map(saved.entities);
+    properties = saved.properties;
+    relations = saved.relations;
+    events = saved.events;
+    knownActors = new Set(saved.knownActors);
+    entityCounter = saved.entityCounter;
+    eventCounter = saved.eventCounter;
+  } else {
+    universe = {
+      id: `universe_${hashSeed(seedRaw)}`,
+      seed: seedRaw,
+      protocol_version: "0.1",
+      created_at: new Date().toISOString()
+    };
+    entities.clear(); properties = []; relations = []; events = [];
+    knownActors.clear(); entityCounter = 0; eventCounter = 0;
+    seedBaseUniverse(seedRaw);
+    saveUniverse();
+  }
+
+  document.getElementById("universeInfo").innerHTML = `
+    <div class="stat"><span class="k">Universe ID</span><span class="v">${universe.id}</span></div>
+    <div class="stat"><span class="k">Seed</span><span class="v">${universe.seed}</span></div>
+    <div class="stat"><span class="k">Protocol</span><span class="v">v${universe.protocol_version}</span></div>
+    <div class="stat"><span class="k">Loaded from</span><span class="v">${saved ? "storage" : "freshly generated"}</span></div>
+  `;
+  document.getElementById("actionPanel").style.display = "block";
+  document.getElementById("previewPanel").style.display = "block";
+  document.getElementById("statePanel").style.display = "block";
+  document.getElementById("logPanel").style.display = "block";
+  onActionTypeChange();
+  populatePreviewCoords();
+  renderAll();
+}
+
+function populatePreviewCoords() {
+  const sel = document.getElementById("previewCoord");
+  sel.innerHTML = "";
+  for (let i = 0; i < BASE_REGION_COUNT; i++) {
+    const opt = document.createElement("option");
+    opt.value = `region:${i}`;
+    opt.textContent = `region:${i}`;
+    sel.appendChild(opt);
+  }
+}
+
+function runPreview() {
+  const coord = document.getElementById("previewCoord").value;
+  const dist = probabilityOf("region.energy_signature", universe.seed, coord);
+  const actual = getProperty(
+    Array.from(entities.values()).find(e => getProperty(e.id, "generation_coordinate") === coord)?.id,
+    "energy_signature"
+  );
+  document.getElementById("previewResult").innerHTML = `
+    <div class="stat"><span class="k">Predicted range</span><span class="v">${dist.min} – ${dist.max}</span></div>
+    <div class="stat"><span class="k">Predicted mean</span><span class="v">${dist.mean}</span></div>
+    <div class="stat"><span class="k">Actual resolved value</span><span class="v">${actual}</span></div>
+  `;
+}
+
+function onActionTypeChange() {
+  const type = document.getElementById("actionType").value;
+  const el = document.getElementById("actionFields");
+  if (type === "spawn_entity") {
+    el.innerHTML = `
+      <label>Entity type</label>
+      <input id="f_type" placeholder="planet, star, npc, item...">
+      <label>Name (optional)</label>
+      <input id="f_name" placeholder="World A">
+    `;
+  } else if (type === "land") {
+    el.innerHTML = `
+      <label>Target entity ID</label>
+      <input id="f_target" placeholder="planet_0001">
+    `;
+  } else if (type === "leave_message") {
+    el.innerHTML = `
+      <label>Target entity ID</label>
+      <input id="f_target" placeholder="planet_0001">
+      <label>Message (max 300 chars)</label>
+      <input id="f_text" placeholder="Nothing but ice here.">
+    `;
+  } else if (type === "region.energy_release") {
+    el.innerHTML = `
+      <label>Target region entity ID</label>
+      <input id="f_target" placeholder="region_0001">
+      <label>Magnitude</label>
+      <input id="f_magnitude" type="number" placeholder="9.8">
+    `;
+  }
+}
+
+function submitAction() {
+  if (!universe) { alert("Create a Universe first."); return; }
+  const actor = document.getElementById("actorInput").value.trim();
+  if (!actor) { alert("Enter an Actor ID."); return; }
+  const type = document.getElementById("actionType").value;
+
+  let action = { actor, type, target: null, data: {} };
+
+  if (type === "spawn_entity") {
+    action.data = { type: document.getElementById("f_type").value.trim(), name: document.getElementById("f_name").value.trim() };
+  } else if (type === "land") {
+    action.target = document.getElementById("f_target").value.trim();
+  } else if (type === "leave_message") {
+    action.target = document.getElementById("f_target").value.trim();
+    action.data = { text: document.getElementById("f_text").value.trim() };
+  } else if (type === "region.energy_release") {
+    action.target = document.getElementById("f_target").value.trim();
+    action.data = { magnitude: parseFloat(document.getElementById("f_magnitude").value) };
+  }
+
+  const result = submitActionInternal(action);
+  renderAll();
+  if (!result.accepted) {
+    // brief inline feedback without blocking flow
+    console.warn("Action rejected:", result.reason);
+  }
+}
+
+function toggleRawState() {
+  const pre = document.getElementById("rawState");
+  if (pre.style.display === "none") {
+    pre.textContent = JSON.stringify({
+      universe, entities: Array.from(entities.values()), properties, relations
+    }, null, 2);
+    pre.style.display = "block";
+  } else {
+    pre.style.display = "none";
+  }
+}
+
+function renderAll() {
+  document.getElementById("statEntities").textContent = entities.size;
+  document.getElementById("statRelations").textContent = relations.length;
+  document.getElementById("statEvents").textContent = events.length;
+
+  const log = document.getElementById("eventLog");
+  if (events.length === 0) {
+    log.innerHTML = `<div class="empty">No events yet. Submit an Action above.</div>`;
+    return;
+  }
+  log.innerHTML = events.slice().reverse().map(ev => `
+    <div class="event">
+      <div class="line1">#${ev.sequence} ${ev.type}<span class="badge">${ev.actor}</span></div>
+      <div class="line2">${ev.target ? "target: " + ev.target + " · " : ""}${JSON.stringify(ev.data)}${ev.narrative ? " · narrative: " + ev.narrative : ""}</div>
+    </div>
+  `).join("");
+}
+</script>
+
+</body>
+</html>
